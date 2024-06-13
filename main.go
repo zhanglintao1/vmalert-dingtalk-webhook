@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/gin-gonic/gin"
 	"net/http"
 	"os"
+
+	"github.com/gin-gonic/gin"
 )
 
 type Alert struct {
@@ -14,7 +15,7 @@ type Alert struct {
 	Labels      map[string]string `json:"labels"`
 	Annotations map[string]string `json:"annotations"`
 	StartsAt    string            `json:"startsAt"`
-	EndAt       string            `json:"endAt"`
+	EndsAt      string            `json:"endsAt"`
 }
 
 type WebhookMessage struct {
@@ -22,7 +23,7 @@ type WebhookMessage struct {
 }
 
 type DingTalkMessage struct {
-	MsgType    string `json:"msgType"`
+	MsgType    string `json:"msgtype"`
 	ActionCard struct {
 		Title          string `json:"title"`
 		Text           string `json:"text"`
@@ -48,10 +49,12 @@ func sendToDingTalk(webhookURL string, message DingTalkMessage) error {
 	if err != nil {
 		return err
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to send message to DingTalk, status code: %d", resp.StatusCode)
 	}
+
 	return nil
 }
 
@@ -68,12 +71,15 @@ func formatMarkdown(alert Alert) string {
 		alert.Labels["severity"],
 		alert.Annotations["description"],
 		alert.StartsAt,
-		alert.EndAt,
+		alert.EndsAt,
 	)
 }
 
 func main() {
 	r := gin.Default()
+
+	// 为了安全起见，不要信任所有代理
+	r.SetTrustedProxies(nil)
 
 	r.POST("/node/:ddkey", func(c *gin.Context) {
 		var message WebhookMessage
@@ -81,21 +87,24 @@ func main() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+
 		ddkey := c.Param("ddkey")
 		dingtalkWebhookBaseURL := os.Getenv("DINGTALK_WEBHOOK_BASE_URL")
 		if dingtalkWebhookBaseURL == "" {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "DINGTALK_WEBHOOK_BASE_URL environment variable is required"})
 			return
 		}
+
 		dingtalkWebhookURL := dingtalkWebhookBaseURL + ddkey
+
 		for _, alert := range message.Alerts {
-			dingTalkMessage := DingTalkMessage{
+			dingtalkMessage := DingTalkMessage{
 				MsgType: "actionCard",
 			}
-			dingTalkMessage.ActionCard.Title = "🚨 New Alert"
-			dingTalkMessage.ActionCard.Text = formatMarkdown(alert)
-			dingTalkMessage.ActionCard.BtnOrientation = "0" // 0: horizontal, 1: vertical
-			dingTalkMessage.ActionCard.Btns = []struct {
+			dingtalkMessage.ActionCard.Title = "🚨 New Alert"
+			dingtalkMessage.ActionCard.Text = formatMarkdown(alert)
+			dingtalkMessage.ActionCard.BtnOrientation = "0" // 0: horizontal, 1: vertical
+			dingtalkMessage.ActionCard.Btns = []struct {
 				Title     string `json:"title"`
 				ActionURL string `json:"actionURL"`
 			}{
@@ -104,19 +113,21 @@ func main() {
 					ActionURL: "http://your-silence-alert-url.com", // 请替换为实际的静默告警URL
 				},
 			}
-			dingTalkMessage.At.AtMobiles = []string{"值班人的手机号"}           // 将值班人的手机号填入此处
-			dingTalkMessage.At.IsAtAll = alert.Labels["severity"] == "critical" // 如果告警严重性为紧急，则@所有人
+			dingtalkMessage.At.AtMobiles = []string{"值班人的手机号"}           // 将值班人的手机号填入此处
+			dingtalkMessage.At.IsAtAll = alert.Labels["severity"] == "critical" // 如果告警严重性为紧急，则@所有人
 
-			if err := sendToDingTalk(dingtalkWebhookURL, dingTalkMessage); err != nil {
+			if err := sendToDingTalk(dingtalkWebhookURL, dingtalkMessage); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
 		}
+
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-	r.Run(":", port)
+	r.Run(":" + port)
 }
