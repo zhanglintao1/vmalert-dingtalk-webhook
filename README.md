@@ -1,0 +1,1 @@
+# vmalert-dingtalk-webhook
