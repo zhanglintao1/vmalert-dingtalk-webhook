@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmalert-dingtalk-webhook
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vmalert-dingtalk-webhook
+  template:
+    metadata:
+      labels:
+        app: vmalert-dingtalk-webhook
+    spec:
+      containers:
+        - name: vmalert-dingtalk-webhook
+          image: registry.cn-shenzhen.aliyuncs.com/k8s-tools-image/vmalert-dingtalk-webhook:v1
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DINGTALK_WEBHOOK_BASE_URL
+              value: "https://oapi.dingtalk.com/robot/send?access_token="
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmalert-dingtalk-webhook
+spec:
+  selector:
+    app: vmalert-dingtalk-webhook
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
